@@ -109,7 +109,13 @@ void reconnectMQTT() {
 
     Serial.print("Conectando MQTT...");
 
-    if (client.connect("ClassificadorLEGO")) {
+    String clientId = "ClassificadorLEGO-";
+    clientId += String(random(0xffff), HEX);
+
+    if (client.connect(
+          clientId.c_str(),
+          mqtt_username,
+          mqtt_password)) {
 
       Serial.println(" conectado");
 
@@ -146,7 +152,7 @@ void enviarMQTT(
   payload += "}";
 
   client.publish(
-      "lego/medidas",
+      "projeto/esteira/medidas",
       payload.c_str());
 
   Serial.println("Dados enviados MQTT");
@@ -159,8 +165,10 @@ SETUP
 */
 
 void setup() {
-
+    
   Serial.begin(115200);
+
+  randomSeed(micros());
 
   pinMode(IN1, OUTPUT);
   pinMode(IN2, OUTPUT);
@@ -179,7 +187,7 @@ void setup() {
 
   conectarWifi();
 
-  client.setServer(mqtt_server, 1883);
+  client.setServer(mqtt_broker, mqtt_port);
 
   Serial.println("Sistema iniciado");
 }
