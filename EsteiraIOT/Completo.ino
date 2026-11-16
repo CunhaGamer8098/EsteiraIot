@@ -190,6 +190,9 @@ void setup() {
   client.setServer(mqtt_broker, mqtt_port);
 
   Serial.println("Sistema iniciado");
+
+  girarFrente();
+
 }
 
 /*
@@ -308,12 +311,18 @@ void loop() {
     /*
       10 - MQTT
     */
-
+if (
+    altura > 0 &&
+    largura > 0 &&
+    comprimento > 0
+   )
+{
     enviarMQTT(
         altura,
         largura,
         comprimento,
         volume);
+}
   }
 
   estadoAnterior = estado;
