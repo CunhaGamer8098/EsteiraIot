@@ -1,139 +1,375 @@
 #include <Stepper.h>
-// Inicializar motores responsáveis
+#include <WiFi.h>          // ESP32
+#include <PubSubClient.h>
+
+/*
+=================================================
+CONFIGURACOES WIFI E MQTT
+=================================================
+*/
+
+const char* ssid = "SEU_WIFI";
+const char* password = "SUA_SENHA";
+
+const char *mqtt_broker = "broker.emqx.io";
+const char *mqtt_username = "emqx";
+const char *mqtt_password = "public";
+const int mqtt_port = 1883;
+
+WiFiClient espClient;
+PubSubClient client(espClient);
+
+/*
+=================================================
+ESTEIRA
+=================================================
+*/
+
 const int IN1 = 2;
 const int IN2 = 3;
 
-// O 28BYJ-48 possui aproximadamente 2048 passos
-// por volta na configuração de passo completo.
+/*
+=================================================
+MOTOR DE PASSO DA PAREDE
+=================================================
+*/
+
 const int passosPorVolta = 2048;
 
-// Ordem dos pinos para o ULN2003
 Stepper motor(passosPorVolta, 8, 10, 9, 11);
 
-// Controle de posição da Parede
 const int CURSO_MAX_PASSOS = 1000;
+
 int posicaoParede = 0;
-int estadoAnterior;
 
-// Sensores, infravermelho e ultrassônico
-const int sensor = 12;
+/*
+=================================================
+SENSORES
+=================================================
+*/
 
-const int trig1 = 4;
-const int echo1 = 5;
-const int trig2 = 6;
-const int echo2 = 7;
+const int sensorIR = 12;
 
-// Variáveis de apoio para os sensores ultrassônicos
+const int trigAltura = 4;
+const int echoAltura = 5;
+
+const int trigLargura = 6;
+const int echoLargura = 7;
+
+/*
+=================================================
+PARAMETROS DE MEDICAO
+=================================================
+*/
+
 const float velocidadeEsteira = 10.0; // cm/s
-const float margemErro = 1.5;         // cm
-const float alturaReferencia = 14.0; // cm
+const float margemErro = 1.5;
 
-void setup(){
-    Serial.begin(9600);
-    // motores
-    pinMode(IN1, OUTPUT);
-    pinMode(IN2, OUTPUT);
+const float alturaReferencia = 14.0;
+const float larguraReferencia = 20.0; // AJUSTAR
 
-    motor.setSpeed(15); // RPM
+/*
+=================================================
+CONTROLE
+=================================================
+*/
 
-    // Sensores
-    pinMode(sensor, INPUT);
+int estadoAnterior = LOW;
 
-    pinMode(trig1, OUTPUT);
-    pinMode(echo1, INPUT);
-    pinMode(trig2, OUTPUT);
-    pinMode(echo2, INPUT);
+/*
+=================================================
+WIFI
+=================================================
+*/
 
-    // configura o estado antigo a partir do sensor
-    estadoAnterior = digitalRead(sensor);
+void conectarWifi() {
+
+  WiFi.begin(ssid, password);
+
+  Serial.print("Conectando WiFi");
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println();
+  Serial.println("WiFi conectado");
 }
 
-void loop(){
-    int estado = digitalRead(sensor);
+/*
+=================================================
+MQTT
+=================================================
+*/
 
-    //Sensor detecta um objeto
-    if (estado == HIGH){
-        pararMotor();
-        // executa quando ocorre mudança
-        if (estadoAnterior == LOW){
-            fecharParede();
-        }
+void reconnectMQTT() {
+
+  while (!client.connected()) {
+
+    Serial.print("Conectando MQTT...");
+
+    if (client.connect("ClassificadorLEGO")) {
+
+      Serial.println(" conectado");
+
+    } else {
+
+      Serial.print(" falhou rc=");
+      Serial.print(client.state());
+
+      delay(2000);
     }
-    else {
-        girarFrente(180);
-        //executa quando ocorre mudança
-        if (estadoAnterior == HIGH){
-            separarParede();
-        }
-    }
-    estadoAnterior = estado;
-}
-
-// Função para movimentar a esteira
-void girarFrente(int velocidade) {
-    // esteira funcionando de forma padrão
-    digitalWrite(IN1, HIGH);
-    digitalWrite(IN2, LOW);
-
-
-}
-
-// Função para parar a esteira
-void pararMotor() {
-    // passa a desligar a esteira para que ela pare de se movimentar
-    digitalWrite(IN1, LOW);
-    digitalWrite(IN2, LOW);
-
-}
-// funções parede
-void fecharParede(){
-    int passos = CURSO_MAX_PASSOS - posicaoParede;
-    if (passos > 0){
-        motor.step(passos);
-        posicaoParede += passos;
-    }
-}
-void separarParede(){
-    int passos = posicaoParede;
-    if (passos > 0 ){
-        motor.step(-passos);
-        posicaoParede -= passos;
-    }
-}
-
-//funções medidas
-
-void calcularLargura(int trig, int echo) {
-
-  float largura = calcularDistancia(trig, echo);
-
-  Serial.print("Largura: ");
-
-  if (largura >= 0) {
-    Serial.print(largura);
-    Serial.println(" cm");
-  } 
-  else {
-    Serial.println("Sem leitura");
   }
 }
 
-void calcularAltura(int trig, int echo) {
+void enviarMQTT(
+    float altura,
+    float largura,
+    float comprimento,
+    float volume) {
 
-  float altura = calcularDistancia(trig, echo);
+  String payload = "{";
 
-  Serial.print("Altura: ");
+  payload += "\"altura\":";
+  payload += String(altura, 2);
 
-  if (altura >= 0) {
+  payload += ",\"largura\":";
+  payload += String(largura, 2);
+
+  payload += ",\"comprimento\":";
+  payload += String(comprimento, 2);
+
+  payload += ",\"volume\":";
+  payload += String(volume, 2);
+
+  payload += "}";
+
+  client.publish(
+      "lego/medidas",
+      payload.c_str());
+
+  Serial.println("Dados enviados MQTT");
+}
+
+/*
+=================================================
+SETUP
+=================================================
+*/
+
+void setup() {
+
+  Serial.begin(115200);
+
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
+
+  motor.setSpeed(15);
+
+  pinMode(sensorIR, INPUT);
+
+  pinMode(trigAltura, OUTPUT);
+  pinMode(echoAltura, INPUT);
+
+  pinMode(trigLargura, OUTPUT);
+  pinMode(echoLargura, INPUT);
+
+  estadoAnterior = digitalRead(sensorIR);
+
+  conectarWifi();
+
+  client.setServer(mqtt_server, 1883);
+
+  Serial.println("Sistema iniciado");
+}
+
+/*
+=================================================
+LOOP
+=================================================
+*/
+
+void loop() {
+
+  if (!client.connected()) {
+    reconnectMQTT();
+  }
+
+  client.loop();
+
+  int estado = digitalRead(sensorIR);
+
+  /*
+    PECA DETECTADA
+  */
+
+  if (estado == HIGH && estadoAnterior == LOW) {
+
+    Serial.println();
+    Serial.println("PECA DETECTADA");
+
+    /*
+      1 - PARA ESTEIRA
+    */
+
+    pararMotor();
+
+    /*
+      2 - FECHA PAREDE
+    */
+
+    fecharParede();
+
+    delay(1000);
+
+    /*
+      3 - ABRE PAREDE
+    */
+
+    separarParede();
+
+    delay(500);
+
+    /*
+      4 - RELIGA A ESTEIRA
+    */
+
+    girarFrente();
+
+    /*
+      5 - MEDIR COMPRIMENTO
+      A PECA ESTA EM MOVIMENTO
+    */
+
+    float comprimento =
+        calcularComprimento(
+            trigAltura,
+            echoAltura);
+
+    /*
+      6 - MEDIR ALTURA
+    */
+
+    float altura =
+        calcularAltura(
+            trigAltura,
+            echoAltura);
+
+    /*
+      7 - MEDIR LARGURA
+    */
+
+    float largura =
+        calcularLargura(
+            trigLargura,
+            echoLargura);
+
+    /*
+      8 - CALCULAR VOLUME
+    */
+
+    float volume =
+        altura *
+        largura *
+        comprimento;
+
+    /*
+      9 - EXIBIR
+    */
+
+    Serial.println();
+    Serial.println("===== RESULTADO =====");
+
+    Serial.print("Altura: ");
     Serial.print(altura);
     Serial.println(" cm");
-  } 
-  else {
-    Serial.println("Sem leitura");
+
+    Serial.print("Largura: ");
+    Serial.print(largura);
+    Serial.println(" cm");
+
+    Serial.print("Comprimento: ");
+    Serial.print(comprimento);
+    Serial.println(" cm");
+
+    Serial.print("Volume: ");
+    Serial.print(volume);
+    Serial.println(" cm3");
+
+    /*
+      10 - MQTT
+    */
+
+    enviarMQTT(
+        altura,
+        largura,
+        comprimento,
+        volume);
+  }
+
+  estadoAnterior = estado;
+}
+
+/*
+=================================================
+ESTEIRA
+=================================================
+*/
+
+void girarFrente() {
+
+  digitalWrite(IN1, HIGH);
+  digitalWrite(IN2, LOW);
+}
+
+void pararMotor() {
+
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, LOW);
+}
+
+/*
+=================================================
+PAREDE
+=================================================
+*/
+
+void fecharParede() {
+
+  int passos =
+      CURSO_MAX_PASSOS - posicaoParede;
+
+  if (passos > 0) {
+
+    motor.step(passos);
+
+    posicaoParede += passos;
   }
 }
 
-float calcularDistancia(int trig, int echo) {
+void separarParede() {
+
+  int passos = posicaoParede;
+
+  if (passos > 0) {
+
+    motor.step(-passos);
+
+    posicaoParede -= passos;
+  }
+}
+
+/*
+=================================================
+ULTRASSONICO
+=================================================
+*/
+
+float calcularDistancia(
+    int trig,
+    int echo,
+    float referencia) {
 
   digitalWrite(trig, LOW);
   delayMicroseconds(2);
@@ -143,64 +379,121 @@ float calcularDistancia(int trig, int echo) {
 
   digitalWrite(trig, LOW);
 
-  unsigned long duracao = pulseIn(echo, HIGH, 30000);
+  unsigned long duracao =
+      pulseIn(echo, HIGH, 30000);
 
   if (duracao == 0) {
     return -1;
   }
 
-  float distancia = duracao * 0.0343 / 2;
+  float distancia =
+      duracao * 0.0343 / 2.0;
 
-  float altura = alturaReferencia - distancia;
+  float medida =
+      referencia - distancia;
+
+  if (medida < 0) {
+    medida = 0;
+  }
+
+  return medida;
+}
+
+/*
+=================================================
+ALTURA
+=================================================
+*/
+
+float calcularAltura(int trig, int echo) {
+
+  float altura =
+      calcularDistancia(
+          trig,
+          echo,
+          alturaReferencia);
 
   return altura;
 }
 
-void calcularComprimento(int trig, int echo) {
+/*
+=================================================
+LARGURA
+=================================================
+*/
 
-  float altura;
+float calcularLargura(int trig, int echo) {
 
-  Serial.println("Aguardando objeto...");
+  float largura =
+      calcularDistancia(
+          trig,
+          echo,
+          larguraReferencia);
 
-  // Aguarda o objeto entrar na região de detecção
+  return largura;
+}
+
+/*
+=================================================
+COMPRIMENTO
+=================================================
+*/
+
+float calcularComprimento(
+    int trig,
+    int echo) {
+
+  float leitura;
+
+  Serial.println(
+      "Aguardando passagem da peca...");
+
   do {
-    altura = calcularDistancia(trig, echo);
-  } while (altura < 0 || altura <= margemErro);
 
-  // Objeto detectado: inicia a contagem
-  unsigned long inicio = millis();
+    leitura =
+        calcularDistancia(
+            trig,
+            echo,
+            alturaReferencia);
 
-  Serial.println("Objeto detectado!");
+  } while (leitura <= margemErro);
+
+  unsigned long inicio =
+      millis();
 
   int leiturasAusentes = 0;
 
-  // Aguarda o objeto sair da região de detecção
   while (leiturasAusentes < 2) {
 
-    altura = calcularDistancia(trig, echo);
+    leitura =
+        calcularDistancia(
+            trig,
+            echo,
+            alturaReferencia);
 
-    if (altura < 0) {
+    if (leitura < 0) {
       continue;
     }
 
-    if (altura <= margemErro) {
+    if (leitura <= margemErro) {
+
       leiturasAusentes++;
+
     } else {
+
       leiturasAusentes = 0;
     }
   }
 
-  unsigned long fim = millis();
+  unsigned long fim =
+      millis();
 
-  float segundos = (fim - inicio) / 1000.0;
+  float segundos =
+      (fim - inicio) / 1000.0;
 
-  float comprimento = velocidadeEsteira * segundos;
+  float comprimento =
+      velocidadeEsteira *
+      segundos;
 
-  Serial.print("Tempo: ");
-  Serial.print(segundos);
-  Serial.println(" s");
-
-  Serial.print("Comprimento: ");
-  Serial.print(comprimento);
-  Serial.println(" cm");
+  return comprimento;
 }
