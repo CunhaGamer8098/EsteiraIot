@@ -10,6 +10,11 @@ const int passosPorVolta = 2048;
 // Ordem dos pinos para o ULN2003
 Stepper motor(passosPorVolta, 8, 10, 9, 11);
 
+// Controle de posição da Parede
+const int CURSO_MAX_PASSOS = 1000;
+int posicaoParede = 0;
+int estadoAnterior;
+
 // Sensores, infravermelho e ultrassônico
 const int sensor = 12;
 
@@ -38,19 +43,30 @@ void setup(){
     pinMode(echo1, INPUT);
     pinMode(trig2, OUTPUT);
     pinMode(echo2, INPUT);
+
+    // configura o estado antigo a partir do sensor
+    estadoAnterior = digitalRead(sensor);
 }
 
 void loop(){
-  int estado = digitalRead(sensor);
+    int estado = digitalRead(sensor);
 
-  if (estado == HIGH){
-    pararMotor();
-    fecharParede();
-  }
-  else {
-    girarFrente(180);
-    separarParede();
-  }
+    //Sensor detecta um objeto
+    if (estado == HIGH){
+        pararMotor();
+        // executa quando ocorre mudança
+        if (estadoAnterior == LOW){
+            fecharParede();
+        }
+    }
+    else {
+        girarFrente(180);
+        //executa quando ocorre mudança
+        if (estadoAnterior == HIGH){
+            separarParede();
+        }
+    }
+    estadoAnterior = estado;
 }
 
 // Função para movimentar a esteira
@@ -71,16 +87,18 @@ void pararMotor() {
 }
 // funções parede
 void fecharParede(){
-    // Parede, começa a unir para alinhar a caixa
-    motor.step(passosPorVolta);
-
-    // colocar uma forma inteligente de se medir a distância
+    int passos = CURSO_MAX_PASSOS - posicaoParede;
+    if (passos > 0){
+        motor.step(passos);
+        posicaoParede += passos;
+    }
 }
 void separarParede(){
-    // Parede começa a soltar a caixa da parede para andar na esteira
-    motor.step(-passosPorVolta);
-
-    // voltar o suficiente para que ele não saia da cremalheira
+    int passos = posicaoParede;
+    if (passos > 0 ){
+        motor.step(-passos);
+        posicaoParede -= passos;
+    }
 }
 
 //funções medidas
