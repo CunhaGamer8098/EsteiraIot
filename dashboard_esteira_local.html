@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Esteira v3 · Monitoramento</title>
+<script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
+<style>
+:root{
+  --bg:oklch(93% .03 250);
+  --panel:oklch(99% .006 250);
+  --ink:oklch(26% .04 260);
+  --ink2:oklch(42% .04 260);
+  --muted:oklch(52% .04 260);
+  --line:oklch(86% .03 250);
+  --head:oklch(17% .05 262);
+  --amber:oklch(84% .16 85);
+  --ok:oklch(58% .15 150);
+  --alert:oklch(56% .2 27);
+  --mono:ui-monospace,"SF Mono",Consolas,"Liberation Mono",monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 "Helvetica Neue",Helvetica,system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+
+header{background:var(--head);color:#eef0f3;border-bottom:4px solid var(--amber);padding:16px 28px;display:flex;flex-wrap:wrap;gap:16px 28px;align-items:flex-end;justify-content:space-between}
+.brand h1{margin:0;font-size:20px;font-weight:650;letter-spacing:.01em}
+.brand p{margin:3px 0 0;font-size:11px;color:oklch(74% .015 250);text-transform:uppercase;letter-spacing:.09em}
+.conn{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end}
+.field{display:flex;flex-direction:column;gap:4px;font-size:10px;color:oklch(74% .015 250);text-transform:uppercase;letter-spacing:.08em;font-weight:600}
+input{background:oklch(20% .05 260);border:1px solid oklch(42% .05 260);color:#f3f4f6;border-radius:6px;padding:8px 10px;font:13px var(--mono);width:210px}
+input:focus{outline:2px solid var(--amber);outline-offset:1px}
+.pill{display:flex;align-items:center;gap:8px;font-size:13px;min-width:170px;height:36px;color:#eef0f3}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--alert);flex:none}
+.dot.on{background:var(--ok);box-shadow:0 0 0 4px oklch(58% .14 150 / .25)}
+button{background:var(--amber);color:oklch(24% .03 80);border:0;border-radius:6px;padding:9px 18px;font:650 13px/1 "Helvetica Neue",Helvetica,system-ui,sans-serif;cursor:pointer;height:36px}
+button:hover{filter:brightness(1.06)}
+button:focus-visible{outline:2px solid #fff;outline-offset:2px}
+
+main{padding:24px 28px 32px;max-width:1440px;margin:0 auto}
+.banner{display:none;background:oklch(94% .04 27);color:oklch(38% .15 27);border:1px solid oklch(80% .09 27);padding:10px 14px;border-radius:8px;margin:0 0 20px;font-size:13px}
+body.offline .banner{display:block}
+body.offline .ind .card{opacity:.6}
+
+.grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:16px}
+.s3{grid-column:span 3}
+.s4{grid-column:span 4}
+.card,.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 18px;min-width:0;transition:opacity .2s,box-shadow .2s,border-color .2s}
+.card{position:relative}
+.lbl{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600}
+.val{font:600 30px/1.1 var(--mono);font-variant-numeric:tabular-nums;margin:12px 0 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink)}
+.val small{font-size:13px;color:var(--muted);font-weight:500;margin-left:4px}
+.meta{font-size:12px;color:var(--muted)}
+.track{height:6px;background:oklch(88% .02 250);border-radius:3px;margin-top:14px;overflow:hidden}
+.bar{height:100%;width:0;background:var(--ink2);border-radius:3px;transition:width .3s ease}
+.card.active{box-shadow:inset 0 3px 0 var(--amber)}
+.card.active .val{color:oklch(55% .13 70)}
+.card.ok{box-shadow:inset 0 3px 0 var(--ok)}
+.card.ok .val{color:var(--ok)}
+.card.alert{border-color:var(--alert);box-shadow:inset 0 3px 0 var(--alert)}
+.card.alert .val{color:var(--alert)}
+.card.alert .bar{background:var(--alert)}
+.tag{display:inline-block;font-size:11px;font-weight:650;text-transform:uppercase;letter-spacing:.06em;padding:3px 8px;border-radius:4px;background:oklch(92% .02 250);color:var(--ink2);margin-top:12px}
+.card.alert .tag{background:var(--alert);color:#fff}
+
+.split{margin-top:16px;display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:16px}
+.cp{grid-column:span 7}
+.lp{grid-column:span 5}
+.phead{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+.phead h2{margin:0;font-size:14px;font-weight:650}
+.legend{display:flex;gap:16px;font-size:12px;color:var(--ink2)}
+.legend i{display:inline-block;width:14px;height:3px;border-radius:2px;margin-right:6px;vertical-align:middle}
+#chart{width:100%;height:300px;display:block}
+
+#log{height:340px;overflow:auto;font:12px/1.5 var(--mono);border-top:1px solid var(--line)}
+.row{display:grid;grid-template-columns:70px 1fr;column-gap:12px;padding:7px 0;border-bottom:1px solid var(--line)}
+.row time{color:var(--muted)}
+.row .tp{color:var(--ink);font-weight:600;word-break:break-all}
+.row .pl{grid-column:2;color:var(--ink2);word-break:break-all}
+.empty{color:var(--muted);font-size:13px;padding:12px 0}
+
+@media (max-width:1100px){
+  .s3,.s4{grid-column:span 6}
+  .ind > .card:last-child{grid-column:span 12}
+  .cp,.lp{grid-column:span 12}
+}
+@media (max-width:640px){
+  header{padding:16px}
+  main{padding:16px}
+  .conn{width:100%}
+  .field{flex:1 1 100%}
+  input{width:100%}
+  .pill{min-width:0}
+  .s3,.s4,.ind > .card:last-child{grid-column:span 12}
+  .val{font-size:26px}
+}
+</style>
+</head>
+<body class="offline">
+<header>
+  <div class="brand">
+    <h1>Esteira v3</h1>
+    <p>Classificação de caixas · Monitoramento</p>
+  </div>
+  <div class="conn">
+    <label class="field">Broker (WebSocket)
+      <input id="url" value="ws://localhost:9001" spellcheck="false">
+    </label>
+    <label class="field">Prefixo de tópicos
+      <input id="base" value="esteira/v3/" spellcheck="false">
+    </label>
+    <div class="pill"><span id="dot" class="dot"></span><span id="status">Desconectado</span></div>
+    <button id="btn" onclick="toggle()">Conectar</button>
+  </div>
+</header>
+
+<main>
+  <div id="banner" class="banner">Sem conexão com o broker. Confirme o endereço e clique em Conectar para receber dados.</div>
+
+  <section class="grid ind">
+    <div class="card s3">
+      <div class="lbl">Distância Z</div>
+      <div class="val" id="z">—<small>cm</small></div>
+      <div class="meta">Sensor ultrassônico superior · 0 a 14 cm</div>
+      <div class="track"><div class="bar" id="zbar"></div></div>
+    </div>
+    <div class="card s3">
+      <div class="lbl">Distância lateral</div>
+      <div class="val" id="lat">—<small>cm</small></div>
+      <div class="meta">Sensor ultrassônico lateral · 0 a 20 cm</div>
+      <div class="track"><div class="bar" id="latbar"></div></div>
+    </div>
+    <div class="card s3">
+      <div class="lbl">Posição da parede</div>
+      <div class="val" id="pos">—<small>mm</small></div>
+      <div class="meta">Motor de passo · curso 0 a 70 mm</div>
+      <div class="track"><div class="bar" id="posbar"></div></div>
+    </div>
+    <div class="card s3">
+      <div class="lbl">Contagem total</div>
+      <div class="val" id="total">—</div>
+      <div class="meta">Caixas classificadas</div>
+    </div>
+
+    <div class="card s4">
+      <div class="lbl">Estado da máquina</div>
+      <div class="val" id="estado">—</div>
+      <div class="meta">Ciclo de classificação</div>
+    </div>
+    <div class="card s4">
+      <div class="lbl">Esteira (motor DC)</div>
+      <div class="val" id="esteira">—</div>
+      <div class="meta">Acionamento da esteira</div>
+    </div>
+    <div class="card s4" id="irCard">
+      <div class="lbl">Infravermelho</div>
+      <div class="val" id="ir">—</div>
+      <div class="meta">Detecção de passagem</div>
+    </div>
+  </section>
+
+  <section class="split">
+    <div class="panel cp">
+      <div class="phead">
+        <h2>Distâncias em tempo real · últimas 120 leituras</h2>
+        <div class="legend">
+          <span><i style="background:oklch(26% .04 260)"></i>Z (cm)</span>
+          <span><i style="background:oklch(84% .16 85)"></i>Lateral (cm)</span>
+        </div>
+      </div>
+      <canvas id="chart"></canvas>
+    </div>
+    <div class="panel lp">
+      <div class="phead"><h2>Mensagens recebidas</h2><span class="meta">Últimas 50</span></div>
+      <div id="log"><div class="empty">Aguardando mensagens…</div></div>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const N = 120, LOG_MAX = 50, Z_MAX = 14, LAT_MAX = 20, POS_MAX = 70, YMAX = 20;
+const zs = [], ls = [];
+let client = null, curBase = 'esteira/v3/';
+
+const clamp = (v, max) => Math.min(Math.max(v, 0), max) / max * 100;
+const push = (arr, v) => { arr.push(v); if (arr.length > N) arr.shift(); };
+
+function normBase(s) {
+  let b = (s || '').trim();
+  if (!b) b = 'esteira/v3/';
+  if (!b.endsWith('/')) b += '/';
+  return b;
+}
+
+function setConn(on, msg) {
+  $('dot').classList.toggle('on', on);
+  $('status').textContent = msg;
+  document.body.classList.toggle('offline', !on);
+}
+
+function toggle() {
+  if (client) {
+    const c = client; client = null;
+    c.end(true);
+    $('btn').textContent = 'Conectar';
+    setConn(false, 'Desconectado');
+    return;
+  }
+  const base = normBase($('base').value);
+  curBase = base;
+  const c = mqtt.connect($('url').value.trim(), {
+    clientId: 'esteira-dash-' + Math.random().toString(16).slice(2, 8),
+    reconnectPeriod: 3000,
+    connectTimeout: 5000
+  });
+  client = c;
+  $('btn').textContent = 'Desconectar';
+  setConn(false, 'Conectando…');
+  c.on('connect', () => { if (c !== client) return; c.subscribe(base + '#'); setConn(true, 'Conectado · ' + base + '#'); });
+  c.on('reconnect', () => { if (c === client) setConn(false, 'Reconectando…'); });
+  c.on('close', () => { if (c === client) setConn(false, 'Desconectado'); });
+  c.on('error', e => { if (c === client) setConn(false, 'Erro: ' + (e && e.message || 'falha na conexão')); });
+  c.on('message', (topic, msg) => {
+    let p;
+    try { p = JSON.parse(msg.toString()); } catch (_) { p = msg.toString(); }
+    handle(topic.slice(curBase.length), p, topic);
+  });
+}
+
+function logMsg(topic, p) {
+  const log = $('log');
+  if (log.querySelector('.empty')) log.textContent = '';
+  const row = document.createElement('div');
+  row.className = 'row';
+  const t = document.createElement('time');
+  t.textContent = new Date().toLocaleTimeString('pt-BR');
+  const tp = document.createElement('span');
+  tp.className = 'tp';
+  tp.textContent = topic;
+  const pl = document.createElement('div');
+  pl.className = 'pl';
+  pl.textContent = typeof p === 'string' ? p : JSON.stringify(p);
+  row.append(t, tp, pl);
+  log.prepend(row);
+  while (log.children.length > LOG_MAX) log.lastChild.remove();
+}
+
+function handle(t, p, raw) {
+  logMsg(raw, p);
+  switch (t) {
+    case 'sensores/z': {
+      const v = +p.distancia_cm;
+      $('z').innerHTML = v.toFixed(1) + '<small>cm</small>';
+      $('zbar').style.width = clamp(v, Z_MAX) + '%';
+      push(zs, v);
+      break;
+    }
+    case 'sensores/lateral': {
+      const v = +p.distancia_cm;
+      $('lat').innerHTML = v.toFixed(1) + '<small>cm</small>';
+      $('latbar').style.width = clamp(v, LAT_MAX) + '%';
+      push(ls, v);
+      break;
+    }
+    case 'sensores/ir': {
+      const on = !!p.detectado;
+      $('ir').textContent = on ? 'Detectado' : 'Livre';
+      $('irCard').classList.toggle('alert', on);
+      break;
+    }
+    case 'atuadores/parede': {
+      const v = +p.posicao_mm;
+      $('pos').innerHTML = v.toFixed(1) + '<small>mm</small>';
+      $('posbar').style.width = clamp(v, POS_MAX) + '%';
+      break;
+    }
+    case 'atuadores/esteira': {
+      const card = $('esteira').closest('.card');
+      $('esteira').textContent = p.ligado ? 'Ligada' : 'Parada';
+      card.classList.toggle('ok', !!p.ligado);
+      break;
+    }
+    case 'status': {
+      const e = String(p.estado || '—');
+      $('estado').textContent = e.charAt(0).toUpperCase() + e.slice(1);
+      $('estado').closest('.card').classList.toggle('active', e !== 'parado');
+      break;
+    }
+    case 'contagem': {
+      $('total').textContent = Number(p.total).toLocaleString('pt-BR');
+      break;
+    }
+  }
+  scheduleChart();
+}
+
+let chartQueued = false;
+function scheduleChart() {
+  if (chartQueued) return;
+  chartQueued = true;
+  requestAnimationFrame(() => { chartQueued = false; drawChart(); });
+}
+
+function drawChart() {
+  const c = $('chart'), dpr = window.devicePixelRatio || 1;
+  const w = c.clientWidth, h = c.clientHeight;
+  if (!w || !h) return;
+  if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) {
+    c.width = Math.round(w * dpr); c.height = Math.round(h * dpr);
+  }
+  const g = c.getContext('2d');
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, w, h);
+  const L = 40, R = 10, T = 10, B = 26, W = w - L - R, H = h - T - B;
+  const x = j => L + (N - zs.length + j) / (N - 1) * W;
+  const y = v => T + H - Math.min(Math.max(v, 0), YMAX) / YMAX * H;
+
+  g.font = '11px ' + getComputedStyle(document.body).fontFamily.split(',')[0];
+  g.font = '11px ui-monospace, Consolas, monospace';
+  g.textBaseline = 'middle';
+  g.fillStyle = 'oklch(52% .04 260)';
+  g.strokeStyle = 'oklch(88% .02 250)';
+  g.lineWidth = 1;
+  for (let v = 0; v <= YMAX; v += 5) {
+    const yy = Math.round(y(v)) + .5;
+    g.beginPath(); g.moveTo(L, yy); g.lineTo(L + W, yy); g.stroke();
+    g.textAlign = 'right';
+    g.fillText(v, L - 8, yy);
+  }
+  g.textBaseline = 'alphabetic';
+  g.textAlign = 'left';
+  g.fillText('−120', L, h - 6);
+  g.textAlign = 'right';
+  g.fillText('agora', L + W, h - 6);
+  g.textAlign = 'center';
+  g.fillText('leituras', L + W / 2, h - 6);
+
+  const plot = (arr, color) => {
+    if (!arr.length) return;
+    g.beginPath();
+    arr.forEach((v, j) => j ? g.lineTo(x(j), y(v)) : g.moveTo(x(j), y(v)));
+    g.strokeStyle = color; g.lineWidth = 2; g.lineJoin = 'round'; g.lineCap = 'round';
+    g.stroke();
+  };
+  plot(ls, 'oklch(84% .16 85)');
+  plot(zs, 'oklch(26% .04 260)');
+}
+
+window.addEventListener('resize', scheduleChart);
+drawChart();
+</script>
+</body>
+</html>
