@@ -1,0 +1,23 @@
+@echo off
+chcp 65001 >nul
+title Esteira v3 - iniciar
+cd /d "%~dp0"
+
+echo Iniciando o broker Mosquitto (janela 1)...
+start "Broker MQTT - nao feche" cmd /k "mosquitto -c mosquitto.conf -v"
+
+timeout /t 3 >nul
+
+echo Iniciando o simulador da esteira (janela 2)...
+start "Simulador - nao feche" cmd /k "python -m pip install -q paho-mqtt && python simulador_esteira.py"
+
+timeout /t 2 >nul
+
+echo Abrindo o dashboard no navegador...
+start "" "%~dp0dashboard_esteira_local.html"
+
+echo.
+echo Pronto. Clique em CONECTAR no dashboard.
+echo Para encerrar: feche as janelas "Broker MQTT" e "Simulador".
+echo.
+pause
